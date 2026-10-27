@@ -58,6 +58,8 @@ struct PikaConfig {
   uint16_t nag_mins;         // repeat the 'missing' reaction while beacons are missing (0 = off)
   uint8_t  react[MON_EV_COUNT];   // PIKA_ACT_* per MonitorEvent
   uint8_t  direct;           // 1 = direct (open-drain, shared pin senses paws), 0 = opto
+  uint16_t wake_idle_secs;   // 'say' after this long idle = wake press + real press (0 = off)
+  uint16_t wake_gap_ms;      // pause between the wake press and the real press
 };
 
 class PikaToy {
@@ -85,6 +87,8 @@ private:
   int _q_head, _q_count;
   bool _pressing;
   unsigned long _release_at, _next_allowed;
+  bool _repeat_pending;                // wake press done, real 'say' press still to come
+  unsigned long _last_activity;        // last time the toy was pressed (by us or a paw), 0 = never
 
   unsigned long _mute_until;
   bool _nag_acked;

@@ -162,6 +162,7 @@ The firmware only ever drives these pins LOW, never HIGH. Between presses the pi
 | `pika` | Status |
 | `pika say` / `pika cheeks` | Press now (test). Only one contact is ever pressed at a time |
 | `pika react` | Show event → action map |
+| `pika wake <idle_secs> [gap_ms]` | If the toy has been idle this long, `say` presses twice: the first wakes it (zap), the second gets the shout. Any press or paw squeeze counts as activity. Default 60 s, 4500 ms (the zap takes about 3 s); 0 = off |
 | `pika react <newap\|changed\|first\|missing\|back> <none\|say\|cheeks>` | Set a reaction. Defaults: Wi-Fi events → cheeks, beacon events → say |
 | `pika nag <mins>` | Repeat the `missing` reaction while beacons are missing (default 30; 0 = off) |
 | `pika ack` | Silence the nag until the next beacon goes missing (same as squeezing the cheeks paw) |

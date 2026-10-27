@@ -3,7 +3,7 @@
 #include <driver/gpio.h>
 #include <helpers/TxtDataHelpers.h>
 
-#define PIKA_CFG_MAGIC     0x50494B33   // 'PIK3'
+#define PIKA_CFG_MAGIC     0x50494B34   // 'PIK4'
 #define PIKA_CFG_FILE      "/pika_cfg"
 
 #define PAW_DEBOUNCE_MILLIS   40
@@ -33,6 +33,8 @@ PikaToy::PikaToy() {
   _q_head = _q_count = 0;
   _pressing = false;
   _release_at = _next_allowed = 0;
+  _repeat_pending = false;
+  _last_activity = 0;
   _mute_until = 0;
   _nag_acked = false;
   _next_nag = 0;
@@ -61,6 +63,8 @@ void PikaToy::setDefaults() {
   _cfg.press_ms = 250;
   _cfg.gap_ms = 3000;
   _cfg.nag_mins = 30;
+  _cfg.wake_idle_secs = 60;    // the toy's first press after idling only wakes it (zap)
+  _cfg.wake_gap_ms = 4500;   // must outlast the wake-up zap sound (~3s)
   // WiFi events light the cheeks, beacon events say "pika" (which also lights the cheeks)
   _cfg.react[MON_EV_NEW_AP] = PIKA_ACT_CHEEKS;
   _cfg.react[MON_EV_CHANGED_AP] = PIKA_ACT_CHEEKS;
@@ -246,6 +250,7 @@ void PikaToy::pollPaws() {
         if (_cfg.paw_passthrough && !_cfg.direct) enqueue(i == 0 ? PIKA_ACT_SAY : PIKA_ACT_CHEEKS);   // direct: toy saw it already
         if (i == 1) _nag_acked = true;   // cheeks paw = acknowledge missing-beacon reminder
         _pending_paw = (i == 0) ? PIKA_PAW_EVENT_SAY : PIKA_PAW_EVENT_CHEEKS;
+        _last_activity = millis();   // a real squeeze wakes the toy too
       }
     }
   }
@@ -272,13 +277,23 @@ void PikaToy::loop(int missing_beacons) {
   if (_pressing) {
     if ((long)(millis() - _release_at) >= 0) {
       releasePins();
-      _next_allowed = millis() + _cfg.gap_ms;
+      _next_allowed = millis() + (_repeat_pending ? _cfg.wake_gap_ms : _cfg.gap_ms);
       _sense_ignore_until = millis() + 300;   // let the line settle before sensing again
+      _last_activity = millis();
     }
+  } else if (_repeat_pending && (long)(millis() - _next_allowed) >= 0) {
+    _repeat_pending = false;   // toy is awake now, the real 'say' press
+    setPin(_cfg.pin_say, true);
+    _pressing = true;
+    _release_at = millis() + _cfg.press_ms;
   } else if (_q_count > 0 && (long)(millis() - _next_allowed) >= 0) {
     uint8_t action = _queue[_q_head];
     _q_head = (_q_head + 1) % PIKA_QUEUE_SIZE;
     _q_count--;
+    if (action == PIKA_ACT_SAY && _cfg.wake_idle_secs > 0 &&
+        (_last_activity == 0 || millis() - _last_activity > (unsigned long)_cfg.wake_idle_secs * 1000UL)) {
+      _repeat_pending = true;   // this press only wakes the toy, press again after wake_gap_ms
+    }
     setPin(action == PIKA_ACT_SAY ? _cfg.pin_say : _cfg.pin_cheeks, true);   // only ever one contact at a time
     _pressing = true;
     _release_at = millis() + _cfg.press_ms;
@@ -317,7 +332,7 @@ bool PikaToy::handleCommand(char* command, char* reply) {
     formatStatus(reply);
 
   } else if (strcmp(cmd, "help") == 0) {
-    strcpy(reply, "pika say|cheeks|on|off|mute <m>|unmute|ack|react [ev act]|mode|pins <s> <c>|paws|press|gap|nag|level|passthru|chan");
+    strcpy(reply, "pika say|cheeks|on|off|mute <m>|unmute|ack|react [ev act]|wake|mode|pins <s> <c>|paws|press|gap|nag|level|passthru|chan");
 
   } else if (strcmp(cmd, "say") == 0 || strcmp(cmd, "cheeks") == 0) {
     if (_cfg.pin_say < 0 && _cfg.pin_cheeks < 0) {
@@ -329,7 +344,7 @@ bool PikaToy::handleCommand(char* command, char* reply) {
 
   } else if (strcmp(cmd, "on") == 0 || strcmp(cmd, "off") == 0) {
     _cfg.enabled = strcmp(cmd, "on") == 0;
-    if (!_cfg.enabled) { _q_count = 0; releasePins(); }
+    if (!_cfg.enabled) { _q_count = 0; _repeat_pending = false; releasePins(); }
     saveConfig();
     strcpy(reply, "OK");
 
@@ -340,6 +355,7 @@ bool PikaToy::handleCommand(char* command, char* reply) {
     } else {
       _mute_until = millis() + (unsigned long)v * 60000UL;
       _q_count = 0;
+      _repeat_pending = false;
       sprintf(reply, "OK - muted for %d mins", v);
     }
 
@@ -405,6 +421,20 @@ bool PikaToy::handleCommand(char* command, char* reply) {
       strcpy(reply, "OK");
     } else {
       sprintf(reply, "mode: %s (pika mode direct|opto)", _cfg.direct ? "direct" : "opto");
+    }
+
+  } else if (strcmp(cmd, "wake") == 0) {
+    int idle = -1, gap = -1;
+    int n = sscanf(arg, "%d %d", &idle, &gap);
+    if (n < 1) {
+      sprintf(reply, "wake: idle %ds, gap %dms (0 = off). pika wake <idle_secs> [gap_ms]", _cfg.wake_idle_secs, _cfg.wake_gap_ms);
+    } else if (idle < 0 || idle > 3600 || (n == 2 && (gap < 200 || gap > 10000))) {
+      strcpy(reply, "Err - idle 0..3600 secs, gap 200..10000 ms");
+    } else {
+      _cfg.wake_idle_secs = idle;
+      if (n == 2) _cfg.wake_gap_ms = gap;
+      saveConfig();
+      strcpy(reply, "OK");
     }
 
   } else if (strcmp(cmd, "press") == 0) {
