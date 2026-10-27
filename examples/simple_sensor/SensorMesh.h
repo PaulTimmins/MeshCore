@@ -108,6 +108,13 @@ protected:
     bool isTriggered() const { return text[0] != 0; }
   };
   void alertIf(bool condition, Trigger& t, AlertPriority pri, const char* text);
+  bool isAlertQueued(const Trigger& t) const {
+    for (int i = 0; i < num_alert_tasks; i++) if (alert_tasks[i] == &t) return true;
+    return false;
+  }
+
+  // send a plain text message to a group channel, as "<node_name>: <text>" (flooded, using default scope)
+  bool sendGroupText(const mesh::GroupChannel& channel, const char* text);
 
   virtual void onSensorDataRead() = 0;   // for app to implement
   virtual int querySeriesData(uint32_t start_secs_ago, uint32_t end_secs_ago, MinMaxAvg dest[], int max_num) = 0;  // for app to implement

@@ -297,6 +297,32 @@ void SensorMesh::alertIf(bool condition, Trigger& t, AlertPriority pri, const ch
   }
 }
 
+#define MAX_GROUP_TEXT_LEN   (10*CIPHER_BLOCK_SIZE)   // same limit as BaseChatMesh MAX_TEXT_LEN
+
+bool SensorMesh::sendGroupText(const mesh::GroupChannel& channel, const char* text) {
+  uint8_t temp[5 + MAX_GROUP_TEXT_LEN + 1];
+  uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+  memcpy(temp, &timestamp, 4);   // mostly an extra blob to help make packet_hash unique
+  temp[4] = (TXT_TYPE_PLAIN << 2);
+
+  int len = snprintf((char *) &temp[5], MAX_GROUP_TEXT_LEN + 1, "%s: %s", _prefs.node_name, text);
+  if (len < 0) return false;
+  if (len > MAX_GROUP_TEXT_LEN) len = MAX_GROUP_TEXT_LEN;   // truncated
+
+  auto pkt = createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, channel, temp, 5 + len);
+  if (pkt == NULL) return false;
+
+  if (default_scope.isNull()) {
+    sendFlood(pkt, (uint32_t)0, _prefs.path_hash_mode + 1);
+  } else {
+    uint16_t codes[2];
+    codes[0] = default_scope.calcTransportCode(pkt);
+    codes[1] = 0;
+    sendFlood(pkt, codes, 0, _prefs.path_hash_mode + 1);
+  }
+  return true;
+}
+
 float SensorMesh::getAirtimeBudgetFactor() const {
   return _prefs.airtime_factor;
 }
